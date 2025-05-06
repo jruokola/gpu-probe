@@ -1,0 +1,31 @@
+    apiVersion: apps/v1
+    kind: DaemonSet
+    metadata:
+      name: gpu-probe-daemonset
+      namespace: default # Or your preferred namespace
+    spec:
+      selector:
+        matchLabels:
+          name: gpu-probe-pod
+      template:
+        metadata:
+          labels:
+            name: gpu-probe-pod
+        spec:
+          # Target only GPU nodes
+          nodeSelector:
+            nebius.com/gpu: "true" # Or use instance-type label
+          # Allow running on nodes with GPU taints if necessary
+          tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"
+          # Important: For a run-to-completion task in a DaemonSet
+          restartPolicy: Never # Or Never, depending on desired behavior if it fails
+          containers:
+          - name: gpu-probe
+            image: cr.eu-north1.nebius.cloud/e00xn9gpx27cp05wsr/gpu-probe:latest # Make sure this is correct
+            command: ["/bin/bash", "run_gpu_burn.sh"] # Adjust path if needed
+            resources:
+              limits:
+                nvidia.com/gpu: 1 # Request a GPU

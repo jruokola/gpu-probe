@@ -1,0 +1,17 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: gpu-probe
+spec:
+  template:
+    spec:
+      nodeSelector:
+        nebius.com/gpu: "true" # Or use the instance-type label
+      containers:
+      - name: gpu-probe
+        image: cr.eu-north1.nebius.cloud/e00xn9gpx27cp05wsr/gpu-probe:latest # Make sure this is correct
+        command: ["/bin/bash", "run_gpu_burn.sh"] # Adjust path if needed
+        resources:
+          limits:
+            nvidia.com/gpu: 1 # Request a GPU
+      restartPolicy: Never

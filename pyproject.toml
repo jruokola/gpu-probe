@@ -1,0 +1,14 @@
+[project]
+name = "gpu_probe"
+version = "0.1.0"
+description = "Nebius GPU-cluster acceptance micro-benchmark"
+requires-python = ">=3.10"
+
+dependencies = [
+  "torch; platform_system != 'Darwin'",
+  "torchvision",
+  "numpy",
+  "mlflow",
+  "psutil",
+  "pynvml",
+]
