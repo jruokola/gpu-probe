@@ -11,8 +11,7 @@ export PYXIS_VERBOSE=3 # Enable Pyxis verbose logging
 #SBATCH --export=ALL                # Export environment variables to srun tasks
 
 # --- Host Path for Shared Storage (where logs might go if /root is part of it) ---
-HOST_SHARED_FS_ROOT_PATH="/" # Assuming filestore is at / on host
-HOST_JOB_OUTPUTS_BASE_PATH="${HOST_SHARED_FS_ROOT_PATH}/root/slurm_jobs_output/gpu_probe_multinode_${SLURM_JOB_ID}"
+HOST_JOB_OUTPUTS_BASE_PATH="/root/slurm_jobs_output/gpu_probe_multinode_${SLURM_JOB_ID}"
 
 echo "------------------------------------------------------------------------------"
 echo "Starting Slurm job $SLURM_JOB_ID (gpu-probe-multi-node) on node: $SLURMD_NODENAME"
@@ -40,7 +39,7 @@ echo "(runner.py will log its own MLflow run for this step)"
 # It will use the 1 GPU allocated to task 0 on that node.
 SRUN_RUNNER_CMD="python -m gpu_probe.runner --test"
 srun --nodes=1 --ntasks=1 --exact --nodelist=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1) \
-    --container-image="docker://<YOUR_REGISTRY>/gpu-probe:latest" \
+    --container-image="docker://cr.eu-north1.nebius.cloud/e00xn9gpx27cp05wsr/gpu-probe:latest" \
     --container-workdir="/app" \
     $SRUN_RUNNER_CMD
 RUNNER_EXIT_CODE=$?
@@ -58,7 +57,6 @@ echo "MASTER_ADDR=$MASTER_ADDR, MASTER_PORT=$MASTER_PORT (for torch.distributed.
 # --no_mlflow because runner.py already started an MLflow run for the overall job (or train.py can log to a new nested run)
 # Let's have train.py log to a new run for clarity of the distributed step
 TRAIN_ARGS="--epochs 1 --batches_per_epoch 20 --lr 0.01 --data_path /tmp/cifar10_dist_probe"
-TRAIN_ARGS+=" --output_dir /tmp/train_probe_output_${SLURM_JOB_ID}" # Ephemeral output inside container
 
 echo "Train arguments: ${TRAIN_ARGS}"
 
@@ -66,11 +64,11 @@ echo "Train arguments: ${TRAIN_ARGS}"
 # Each srun task will be one process in the distributed training job.
 # The --container-image, workdir, mounts are inherited by srun if not overridden, but explicit is safer.
 
-SRUN_TRAIN_CMD="python -m torch.distributed.run --nproc_per_node=1 --nnodes=${SLURM_NNODES} --rdzv_id=${SLURM_JOB_ID} --rdzv_backend=c10d --rdzv_endpoint=${MASTER_ADDR}:${MASTER_PORT} gpu_probe.train ${TRAIN_ARGS}"
+SRUN_TRAIN_CMD="python -m torch.distributed.run --nproc_per_node=1 --nnodes=${SLURM_NNODES} --rdzv_id=${SLURM_JOB_ID} --rdzv_backend=c10d --rdzv_endpoint=${MASTER_ADDR}:${MASTER_PORT} src/gpu_probe/train.py ${TRAIN_ARGS}"
 echo "Executing on all ${SLURM_NNODES} nodes: ${SRUN_TRAIN_CMD}"
 
 srun \
-    --container-image="docker://<YOUR_REGISTRY>/gpu-probe:latest" \
+    --container-image="docker://cr.eu-north1.nebius.cloud/e00xn9gpx27cp05wsr/gpu-probe:latest" \
     --container-workdir="/app" \
     bash -c "${SRUN_TRAIN_CMD}" # Wrap in bash -c to handle complex command with args
 
