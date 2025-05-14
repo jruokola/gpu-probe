@@ -35,7 +35,9 @@ export MASTER_PORT=29501                         # pick any free port
 GPUS_PER_NODE=$SLURM_GPUS_ON_NODE                # 1 in this batch
 WORLD_SIZE=$(($SLURM_NNODES * $GPUS_PER_NODE))   # torchrun flag
 
-TRAIN_ARGS="--epochs 1 --batches_per_epoch 20 --lr 0.01 --data_path /tmp/cifar10_dist_probe"
+# Changed data_path to reflect user feedback about shared directory being /
+# User should ensure /cifar10_gpu_probe_data is a writable path on the shared filesystem.
+TRAIN_ARGS="--epochs 1 --batches_per_epoch 20 --lr 0.01 --data_path /cifar10_gpu_probe_data"
 
 SRUN_CMD="torchrun \
           --nnodes=$SLURM_NNODES \

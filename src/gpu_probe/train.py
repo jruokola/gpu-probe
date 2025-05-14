@@ -112,19 +112,20 @@ def main():
     )
 
     try:
-        # Ensure data_path exists
-        if not os.path.exists(cli_args.data_path) and is_master:
-            os.makedirs(cli_args.data_path, exist_ok=True)
+        # If using a shared data_path, only master should create directory and download
+        if is_master:
+            if not os.path.exists(cli_args.data_path):
+                os.makedirs(cli_args.data_path, exist_ok=True)
+
         if is_distributed:
-            # Ensure all processes wait for master to create dir if it didn't exist
-            dist.barrier()
+            dist.barrier()  # Ensure directory is created by master before others proceed
 
         trainset = torchvision.datasets.CIFAR10(
             root=cli_args.data_path, train=True, download=is_master, transform=transform
         )
+
         if is_distributed:
-            # Ensure download is complete before other ranks try to load
-            dist.barrier()
+            dist.barrier()  # Ensure master has downloaded before others try to access
             train_sampler = DistributedSampler(
                 trainset, num_replicas=world_size, rank=rank, shuffle=True
             )
