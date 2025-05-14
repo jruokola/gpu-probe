@@ -9,7 +9,7 @@ set -euo pipefail
 #               -o /opt/nccl-tests/nccl-tests-2.20.tar.gz
 # Then bake /opt/nccl-tests/nccl-tests-2.20.tar.gz into the container image
 # or copy it to a shared path accessible by all Slurm nodes.
-SRC_TARBALL="/nccl-tests-2.20.tar.gz"
+SRC_TARBALL="/app/nccl-tests-2.20.tar.gz"
 
 # ── 2. Scratch build dir ─────────────────────────────────────────────────────
 BUILD_DIR="$(mktemp -d)"
