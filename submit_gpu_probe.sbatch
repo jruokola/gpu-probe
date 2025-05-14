@@ -1,85 +1,67 @@
 #!/bin/bash
-export PYXIS_VERBOSE=3 # Enable Pyxis verbose logging
-#SBATCH --job-name=gpu-probe-multi-node
-#SBATCH --nodes=2                   # Request 2 nodes for multi-node training test
-#SBATCH --ntasks-per-node=1         # 1 task per node for the distributed training
-#SBATCH --gres=gpu:1                # 1 GPU per task/node
-#SBATCH --cpus-per-task=16          # CPUs for each task (train.py process)
-#SBATCH --mem=64G                   # Memory per node (train.py uses CIFAR10, moderate memory)
-#SBATCH --time=01:00:00             # Time limit for all tests on one node
-#SBATCH --output=/root/gpu_probe_multinode_%j.log # Log file
-#SBATCH --export=ALL                # Export environment variables to srun tasks
+#SBATCH --job-name=gpu-probe-multinode
+#SBATCH --nodes=2                    # number of nodes
+#SBATCH --ntasks-per-node=1          # 1 launcher per node
+#SBATCH --gres=gpu:1                 # gpus per node
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=64G
+#SBATCH --time=01:00:00
+#SBATCH --output=/root/gpu_probe_%j.log
+#SBATCH --export=ALL                 # pass env to container tasks
 
-# --- Host Path for Shared Storage (where logs might go if /root is part of it) ---
-HOST_JOB_OUTPUTS_BASE_PATH="/root/slurm_jobs_output/gpu_probe_multinode_${SLURM_JOB_ID}"
+export PYXIS_VERBOSE=3
 
-echo "------------------------------------------------------------------------------"
-echo "Starting Slurm job $SLURM_JOB_ID (gpu-probe-multi-node) on node: $SLURMD_NODENAME"
-echo "SLURM_PROCID=$SLURM_PROCID, SLURM_NPROCS=$SLURM_NPROCS, SLURM_JOB_GPUS=$SLURM_JOB_GPUS, SLURM_GPUS_ON_NODE=$SLURM_GPUS_ON_NODE"
-
-# MLflow Configuration (exported to srun via --export=ALL)
+###############################################################################
+# 1. user-level env (MLflow, etc.) – will be inherited by every srun / torchrun
+###############################################################################
 export MLFLOW_TRACKING_URI="public-tracking.mlflow-e00spsxj9fckt2k6pz.backbone-e00qwnewt2vzn1dh4s.msp.eu-north1.nebius.cloud"
-export MLFLOW_TRACKING_SERVER_CERT_PATH="/etc/mlflow/certs/ca.pem" # Path inside container
+export MLFLOW_TRACKING_SERVER_CERT_PATH="/etc/mlflow/certs/ca.pem"
 export MLFLOW_EXPERIMENT_NAME="GPU_Probe_MultiNode_Tests"
 export MLFLOW_TRACKING_USERNAME="jruokola"
 export MLFLOW_TRACKING_PASSWORD="K3m1k44l1!!666"
 
-# The runner.py script uses /tmp for nccl.txt, which is ephemeral to the container.
-# No explicit data/checkpoint mounts needed for gpu-probe itself, unless its sub-scripts require them.
+###############################################################################
+# 2. node-local probe on the *first* node only
+###############################################################################
+FIRST_NODE=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
+srun --nodes=1 --ntasks=1 --exact --nodelist="$FIRST_NODE" \
+     --container-image=docker://cr.eu-north1.nebius.cloud/e00xn9gpx27cp05wsr/gpu-probe:latest \
+     --container-workdir=/app \
+     --container-env=MLFLOW_TRACKING_URI,MLFLOW_TRACKING_SERVER_CERT_PATH,MLFLOW_EXPERIMENT_NAME,MLFLOW_TRACKING_USERNAME,MLFLOW_TRACKING_PASSWORD \
+     python -m gpu_probe.runner --test
+PROBE_RC=$?
 
-# The main command to be executed inside the container by srun
-# runner.py will internally use torchrun for the train.py part to utilize the allocated GPUs.
-# PYTHONPATH is set in the Dockerfile to /app/src, WORKDIR is /app.
-RUNNER_COMMAND="python -m gpu_probe.runner --test"
+###############################################################################
+# 3. multi-node distributed training
+###############################################################################
+export MASTER_ADDR=$FIRST_NODE
+export MASTER_PORT=29501                         # pick any free port
+GPUS_PER_NODE=$SLURM_GPUS_ON_NODE                # 1 in this batch
+WORLD_SIZE=$(($SLURM_NNODES * $GPUS_PER_NODE))   # torchrun flag
 
-echo "------------------------------------------------------------------------------"
-echo "Step 1: Running Node-Local Probes (NCCL, GPU Burn) on FIRST allocated node: $SLURMD_NODENAME"
-echo "(runner.py will log its own MLflow run for this step)"
-# Use srun to restrict runner.py to only the first node of the allocation for these local tests
-# It will use the 1 GPU allocated to task 0 on that node.
-SRUN_RUNNER_CMD="python -m gpu_probe.runner --test"
-srun --nodes=1 --ntasks=1 --exact --nodelist=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1) \
-    --container-image="docker://cr.eu-north1.nebius.cloud/e00xn9gpx27cp05wsr/gpu-probe:latest" \
-    --container-workdir="/app" \
-    $SRUN_RUNNER_CMD
-RUNNER_EXIT_CODE=$?
-echo "Node-local probes (runner.py) on first node finished with exit code $RUNNER_EXIT_CODE."
-echo "------------------------------------------------------------------------------"
-
-echo "------------------------------------------------------------------------------"
-echo "Step 2: Launching Multi-Node Distributed Training Test (gpu_probe.train.py)"
-
-export MASTER_ADDR=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
-export MASTER_PORT=29501 # Use a different port just in case
-echo "MASTER_ADDR=$MASTER_ADDR, MASTER_PORT=$MASTER_PORT (for torch.distributed.run)"
-
-# Arguments for train.py for this multi-node test
-# --no_mlflow because runner.py already started an MLflow run for the overall job (or train.py can log to a new nested run)
-# Let's have train.py log to a new run for clarity of the distributed step
 TRAIN_ARGS="--epochs 1 --batches_per_epoch 20 --lr 0.01 --data_path /tmp/cifar10_dist_probe"
 
-echo "Train arguments: ${TRAIN_ARGS}"
+SRUN_CMD="torchrun \
+          --nnodes=$SLURM_NNODES \
+          --nproc_per_node=$GPUS_PER_NODE \
+          --rdzv_backend=c10d \
+          --rdzv_endpoint=${MASTER_ADDR}:${MASTER_PORT} \
+          --node_rank=\${SLURM_NODEID} \
+          src/gpu_probe/train.py $TRAIN_ARGS"
 
-# Use srun to launch python -m torch.distributed.run across ALL allocated nodes ($SLURM_NNODES)
-# Each srun task will be one process in the distributed training job.
-# The --container-image, workdir, mounts are inherited by srun if not overridden, but explicit is safer.
+srun --container-image=docker://cr.eu-north1.nebius.cloud/e00xn9gpx27cp05wsr/gpu-probe:latest \
+     --container-workdir=/app \
+     --container-env=MASTER_ADDR,MASTER_PORT,MLFLOW_TRACKING_URI,MLFLOW_TRACKING_SERVER_CERT_PATH,MLFLOW_EXPERIMENT_NAME,MLFLOW_TRACKING_USERNAME,MLFLOW_TRACKING_PASSWORD \
+     bash -c "$SRUN_CMD"
+TRAIN_RC=$?
 
-SRUN_TRAIN_CMD="python -m torch.distributed.run --nproc_per_node=1 --nnodes=${SLURM_NNODES} --rdzv_id=${SLURM_JOB_ID} --rdzv_backend=c10d --rdzv_endpoint=${MASTER_ADDR}:${MASTER_PORT} src/gpu_probe/train.py ${TRAIN_ARGS}"
-echo "Executing on all ${SLURM_NNODES} nodes: ${SRUN_TRAIN_CMD}"
-
-srun \
-    --container-image="docker://cr.eu-north1.nebius.cloud/e00xn9gpx27cp05wsr/gpu-probe:latest" \
-    --container-workdir="/app" \
-    bash -c "${SRUN_TRAIN_CMD}" # Wrap in bash -c to handle complex command with args
-
-TRAIN_EXIT_CODE=$?
-echo "------------------------------------------------------------------------------"
-echo "Multi-node distributed training test finished with exit code $TRAIN_EXIT_CODE."
-
-if [ "$RUNNER_EXIT_CODE" -ne 0 ] || [ "$TRAIN_EXIT_CODE" -ne 0 ]; then
-    echo "One or more GPU probe steps failed."
-    exit 1
-else
-    echo "All GPU probe steps completed successfully."
+###############################################################################
+# 4. final result
+###############################################################################
+if [[ $PROBE_RC -eq 0 && $TRAIN_RC -eq 0 ]]; then
+    echo "✅ All GPU-probe steps completed successfully."
     exit 0
-fi 
+else
+    echo "❌ One or more steps failed (runner=$PROBE_RC, train=$TRAIN_RC)."
+    exit 1
+fi

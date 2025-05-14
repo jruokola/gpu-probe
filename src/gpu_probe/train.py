@@ -5,7 +5,6 @@ import mlflow  # For logging metrics
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-import torch.optim as optim
 import torchvision
 import torchvision.transforms as transforms
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -141,12 +140,14 @@ def main():
             )
         else:
             train_sampler = None
-
+        imgs_per_gpu = 1024 if world_size < 4 else 512
         trainloader = DataLoader(
             trainset,
-            batch_size=16 * (world_size if is_distributed else 1),
+            batch_size=imgs_per_gpu,
             shuffle=(train_sampler is None),
-            num_workers=2,
+            num_workers=8,  # feed GPUs fast enough
+            prefetch_factor=4,
+            pin_memory=True,
             sampler=train_sampler,
         )
 
@@ -163,7 +164,12 @@ def main():
             )
 
         criterion = nn.CrossEntropyLoss()
-        optimizer = optim.SGD(model.parameters(), lr=cli_args.lr, momentum=0.9)
+        # ---- LR & optimizer section ----
+        global_batch = imgs_per_gpu * max(world_size, 1)  # <- fix
+        lrate = cli_args.lr * global_batch / 128  # <- fix
+        optimizer = torch.optim.SGD(
+            model.parameters(), lr=lrate, momentum=0.9, weight_decay=5e-4
+        )
 
         if is_master:
             print(f"Starting training on {device} for {cli_args.epochs} epochs...")
