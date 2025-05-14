@@ -19,9 +19,10 @@ export PYXIS_VERBOSE=3
 ###############################################################################
 # 2. node-local probe on the *first* node only
 ###############################################################################
+DOCKER_IMAGE=cr.eu-north1.nebius.cloud/e00hdcpaq6azg81mmp/gpu-probe:latest
 FIRST_NODE=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
 srun --nodes=1 --ntasks=1 --exact --nodelist="$FIRST_NODE" \
-     --container-image=docker://cr.eu-north1.nebius.cloud/e00xn9gpx27cp05wsr/gpu-probe:latest \
+     --container-image=$DOCKER_IMAGE \
      --container-workdir=/app \
      python -m gpu_probe.runner --test
 PROBE_RC=$?
@@ -44,7 +45,7 @@ SRUN_CMD="torchrun \
           --node_rank=\${SLURM_NODEID} \
           src/gpu_probe/train.py $TRAIN_ARGS"
 
-srun --container-image=docker://cr.eu-north1.nebius.cloud/e00xn9gpx27cp05wsr/gpu-probe:latest \
+srun --container-image=$DOCKER_IMAGE \
      --container-workdir=/app \
      --container-env=MASTER_ADDR,MASTER_PORT \
      bash -c "$SRUN_CMD"
