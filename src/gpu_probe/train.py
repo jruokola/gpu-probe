@@ -1,15 +1,16 @@
+import argparse
+import os
+
+import mlflow  # For logging metrics
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 import torch.optim as optim
 import torchvision
 import torchvision.transforms as transforms
-import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import DataLoader
-import os
-import argparse
-import mlflow  # For logging metrics
+from torch.utils.data.distributed import DistributedSampler
 
 
 def setup_distributed():
@@ -149,7 +150,7 @@ def main():
             sampler=train_sampler,
         )
 
-        model = torchvision.models.resnet18(
+        model = torchvision.models.resnet50(
             weights=None, num_classes=10
         )  # Using weights=None for faster init
         model.to(device)
