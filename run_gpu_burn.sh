@@ -1,22 +1,40 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 
-# Clone, build and run gpu-burn directly in the current environment
-# Assumes git, make, gcc are installed
-echo "Cloning gpu-burn..."
-git clone https://github.com/wilicc/gpu-burn || { echo 'Failed to clone gpu-burn'; exit 1; }
+# ---------------------------------------------------------------------------
+# Settings – change only these two paths
+# ---------------------------------------------------------------------------
+SRC_TARBALL="/gpu-burn-1.0.tar.gz"   # pre-downloaded archive
+BUILD_DIR="$(mktemp -d)"                          # scratch build dir
 
-cd gpu-burn || { echo 'Failed cd to gpu-burn'; exit 1; }
+# ---------------------------------------------------------------------------
+# 1. unpack source
+# ---------------------------------------------------------------------------
+if [[ ! -f "$SRC_TARBALL" ]]; then
+  echo "ERROR: gpu-burn tarball not found at $SRC_TARBALL" >&2
+  exit 1
+fi
+echo "Extracting gpu-burn from $SRC_TARBALL → $BUILD_DIR"
+tar -xzf "$SRC_TARBALL" -C "$BUILD_DIR"
 
+cd "$BUILD_DIR"/gpu-burn*              # handles versioned dir names
+
+# ---------------------------------------------------------------------------
+# 2. build
+# ---------------------------------------------------------------------------
 echo "Building gpu-burn..."
-make || { echo 'Failed to build gpu-burn'; exit 1; }
+make  # assumes CUDA toolkit & build-essentials already present
 
-echo "Running gpu-burn..."
-./gpu_burn 30 || { echo 'gpu-burn command failed'; exit 1; }
+# ---------------------------------------------------------------------------
+# 3. run burn test (30 s default or use $1)
+# ---------------------------------------------------------------------------
+SECONDS=${1:-30}
+echo "Running gpu-burn for $SECONDS seconds..."
+./gpu_burn "$SECONDS"
 
-echo "gpu-burn completed."
-# Cleanup (optional)
-cd ..
-rm -rf gpu-burn
-
+# ---------------------------------------------------------------------------
+# 4. cleanup
+# ---------------------------------------------------------------------------
+echo "gpu-burn completed; cleaning up."
+rm -rf "$BUILD_DIR"
 exit 0
