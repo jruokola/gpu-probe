@@ -1,7 +1,6 @@
 import argparse
 import os
 
-import mlflow  # For logging metrics
 import torch
 import torch.distributed as dist
 import torch.nn as nn
@@ -81,11 +80,6 @@ def main():
         action="store_true",
         help="Run a minimal test on CPU for 1 batch (for CI).",
     )
-    parser.add_argument(
-        "--no_mlflow",
-        action="store_true",
-        help="Disable MLflow logging for this script.",
-    )
     cli_args = parser.parse_args()
 
     rank, world_size, local_rank, device = setup_distributed()
@@ -105,16 +99,12 @@ def main():
         world_size = 1
         is_master = True  # Simulate master for dry run
 
-    if is_master and not cli_args.no_mlflow and mlflow.active_run():
-        mlflow.log_params(
-            {
-                "train_script_epochs": cli_args.epochs,
-                "train_script_lr": cli_args.lr,
-                "train_script_batches_per_epoch": cli_args.batches_per_epoch,
-                "train_script_is_distributed": is_distributed,
-                "train_script_world_size": world_size if is_distributed else 1,
-                "train_script_dry_run_cpu": cli_args.dry_run_cpu,
-            }
+    if is_master:
+        # Log parameters to console if needed, MLflow is removed
+        print(
+            f"Train script params: epochs={cli_args.epochs}, lr={cli_args.lr}, "
+            f"batches_per_epoch={cli_args.batches_per_epoch}, is_distributed={is_distributed}, "
+            f"world_size={world_size if is_distributed else 1}, dry_run_cpu={cli_args.dry_run_cpu}"
         )
 
     transform = transforms.Compose(
@@ -196,12 +186,7 @@ def main():
                     print(
                         f"[Epoch {epoch + 1}, Batch {i + 1:5d}] loss: {running_loss / 100:.3f}"
                     )
-                    if not cli_args.no_mlflow and mlflow.active_run():
-                        mlflow.log_metric(
-                            "train_batch_loss",
-                            running_loss / 100,
-                            step=(epoch * len(trainloader)) + i,
-                        )
+                    # MLflow logging removed
                     running_loss = 0.0
                 if (
                     cli_args.batches_per_epoch > 0
@@ -213,14 +198,11 @@ def main():
 
         if is_master:
             print("Finished Training Test")
-            if not cli_args.no_mlflow and mlflow.active_run():
-                mlflow.log_metric("train_script_completed", 1)
+            # MLflow logging removed
 
     except Exception as e:
         print(f"[Rank {rank if rank != -1 else 'N/A'}] Error during training: {e}")
-        if is_master and not cli_args.no_mlflow and mlflow.active_run():
-            mlflow.log_metric("train_script_completed", 0)
-            mlflow.log_param("train_script_error", str(e))
+        # MLflow logging removed
         raise  # Re-raise exception to mark job as failed
     finally:
         if is_distributed:

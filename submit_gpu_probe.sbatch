@@ -4,7 +4,7 @@
 #SBATCH --ntasks-per-node=1          # 1 launcher per node
 #SBATCH --gres=gpu:1                 # gpus per node
 #SBATCH --cpus-per-task=16
-#SBATCH --mem=64G
+#SBATCH --mem=180G
 #SBATCH --time=01:00:00
 #SBATCH --output=/root/gpu_probe_%j.log
 #SBATCH --export=ALL                 # pass env to container tasks
@@ -12,13 +12,9 @@
 export PYXIS_VERBOSE=3
 
 ###############################################################################
-# 1. user-level env (MLflow, etc.) – will be inherited by every srun / torchrun
+# 1. user-level env – will be inherited by every srun / torchrun
 ###############################################################################
-export MLFLOW_TRACKING_URI="public-tracking.mlflow-e00spsxj9fckt2k6pz.backbone-e00qwnewt2vzn1dh4s.msp.eu-north1.nebius.cloud"
-export MLFLOW_TRACKING_SERVER_CERT_PATH="/etc/mlflow/certs/ca.pem"
-export MLFLOW_EXPERIMENT_NAME="GPU_Probe_MultiNode_Tests"
-export MLFLOW_TRACKING_USERNAME="jruokola"
-export MLFLOW_TRACKING_PASSWORD="K3m1k44l1!!666"
+# MLflow environment variables removed
 
 ###############################################################################
 # 2. node-local probe on the *first* node only
@@ -27,7 +23,6 @@ FIRST_NODE=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
 srun --nodes=1 --ntasks=1 --exact --nodelist="$FIRST_NODE" \
      --container-image=docker://cr.eu-north1.nebius.cloud/e00xn9gpx27cp05wsr/gpu-probe:latest \
      --container-workdir=/app \
-     --container-env=MLFLOW_TRACKING_URI,MLFLOW_TRACKING_SERVER_CERT_PATH,MLFLOW_EXPERIMENT_NAME,MLFLOW_TRACKING_USERNAME,MLFLOW_TRACKING_PASSWORD \
      python -m gpu_probe.runner --test
 PROBE_RC=$?
 
@@ -51,7 +46,7 @@ SRUN_CMD="torchrun \
 
 srun --container-image=docker://cr.eu-north1.nebius.cloud/e00xn9gpx27cp05wsr/gpu-probe:latest \
      --container-workdir=/app \
-     --container-env=MASTER_ADDR,MASTER_PORT,MLFLOW_TRACKING_URI,MLFLOW_TRACKING_SERVER_CERT_PATH,MLFLOW_EXPERIMENT_NAME,MLFLOW_TRACKING_USERNAME,MLFLOW_TRACKING_PASSWORD \
+     --container-env=MASTER_ADDR,MASTER_PORT \
      bash -c "$SRUN_CMD"
 TRAIN_RC=$?
 

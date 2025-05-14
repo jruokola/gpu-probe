@@ -1,9 +1,8 @@
 #!/usr/bin/env python
-import os
-import subprocess
-import mlflow
 import logging
+import os
 import re
+import subprocess
 import sys
 
 # Define package-relative paths if needed, but absolute paths work in container
@@ -40,15 +39,11 @@ def run_command(command, script_name, is_train_test=False):
         output = f"""{process.stdout}\n{process.stderr}"""
         exit_code = process.returncode
         logging.info(f"{script_name} finished with exit code: {exit_code}")
-        if mlflow.active_run():
-            mlflow.log_text(output, f"{script_name}_output.txt")
-            mlflow.log_metric(f"{script_name}_exit_code", exit_code)
+        # Log output to console or a local file if needed, MLflow is removed
+        logging.debug(f"{script_name} output:\n{output}")
         return exit_code, output
     except Exception as e:
         logging.error(f"Failed to run {script_name}: {e}")
-        if mlflow.active_run():
-            mlflow.log_metric(f"{script_name}_exit_code", -1)
-            mlflow.log_text(str(e), f"{script_name}_error.txt")
         return -1, str(e)
 
 
@@ -96,52 +91,50 @@ def main():
     # Distributed training test for train.py will be a separate srun step in the sbatch script.
 
     try:
-        with mlflow.start_run() as run:  # MLflow run for this node's local probe tests
-            logging.info(
-                f"Started MLflow run for node-local GPU probe: {run.info.run_id}"
-            )
-            node_name = os.getenv(
-                "SLURMD_NODENAME", os.getenv("NODE_NAME", "unknown_node")
-            )
-            slurm_job_id = os.getenv(
-                "SLURM_JOB_ID", "N/A"
-            )  # This will be the main job ID
-            slurm_step_id = os.getenv(
-                "SLURM_STEP_ID", "N/A"
-            )  # If runner.py is launched as a step
+        node_name = os.getenv("SLURMD_NODENAME", os.getenv("NODE_NAME", "unknown_node"))
+        slurm_job_id = os.getenv("SLURM_JOB_ID", "N/A")
+        slurm_step_id = os.getenv("SLURM_STEP_ID", "N/A")
 
-            mlflow.set_tag("node_name", node_name)
-            mlflow.set_tag("slurm_job_id", slurm_job_id)
-            mlflow.set_tag("slurm_step_id", slurm_step_id)
-            mlflow.log_param("test_type", "gpu_probe_node_local_tests")
+        logging.info(f"Starting node-local GPU probe on node: {node_name}")
+        logging.info(f"SLURM Job ID: {slurm_job_id}, Step ID: {slurm_step_id}")
+        logging.info("Test type: gpu_probe_node_local_tests")
 
-            # --- Run NCCL Test (node-local) ---
-            # Assumes run_nccl.sh uses GPUs available on this node.
-            nccl_exit_code, _ = run_command(NCCL_SCRIPT, "nccl_test_local")
-            if nccl_exit_code == 0:
-                bandwidth = parse_nccl_bandwidth(NCCL_OUTPUT_FILE)
-                if bandwidth is not None:
-                    mlflow.log_metric("nccl_bandwidth_gbs_local", bandwidth)
+        # --- Run NCCL Test (node-local) ---
+        # Assumes run_nccl.sh uses GPUs available on this node.
+        nccl_exit_code, _ = run_command(NCCL_SCRIPT, "nccl_test_local")
+        if nccl_exit_code == 0:
+            bandwidth = parse_nccl_bandwidth(NCCL_OUTPUT_FILE)
+            if bandwidth is not None:
+                logging.info(f"NCCL Bandwidth (local): {bandwidth} GB/s")
+            else:
+                logging.warning("Failed to parse NCCL bandwidth (local).")
+        else:
+            logging.error("NCCL test (local) failed.")
 
-            # --- Run GPU Burn Test (node-local) ---
-            # Assumes run_gpu_burn.sh uses GPUs available on this node.
-            gpu_burn_exit_code, _ = run_command(GPU_BURN_SCRIPT, "gpu_burn_test_local")
-            mlflow.log_metric(
-                "gpu_burn_passed_local", 1 if gpu_burn_exit_code == 0 else 0
-            )
+        # --- Run GPU Burn Test (node-local) ---
+        # Assumes run_gpu_burn.sh uses GPUs available on this node.
+        gpu_burn_exit_code, _ = run_command(GPU_BURN_SCRIPT, "gpu_burn_test_local")
+        if gpu_burn_exit_code == 0:
+            logging.info("GPU Burn test (local) passed.")
+        else:
+            logging.error("GPU Burn test (local) failed.")
 
-            # --- Training test is now a separate Slurm job step for multi-node ---
-            logging.info("Node-local tests (NCCL, GPU Burn) completed.")
-            logging.info(
-                "Multi-node distributed training test for train.py should be a separate srun command in the sbatch script."
-            )
+        # --- Training test is now a separate Slurm job step for multi-node ---
+        logging.info("Node-local tests (NCCL, GPU Burn) completed.")
+        logging.info(
+            "Multi-node distributed training test for train.py should be a separate srun command in the sbatch script."
+        )
 
-            logging.info("MLflow run for node-local GPU probe completed.")
+        # Determine overall success for exit code
+        if nccl_exit_code == 0 and gpu_burn_exit_code == 0:
+            logging.info("All node-local GPU probe tests passed.")
+            sys.exit(0)
+        else:
+            logging.error("One or more node-local GPU probe tests failed.")
+            sys.exit(1)
 
     except Exception as e:
-        logging.error(f"MLflow tracking or local script execution failed: {e}")
-        # Decide on exit code strategy here. If this runner is just one part of a larger sbatch script,
-        # its exit might not terminate the whole sbatch job unless sbatch is configured to do so.
+        logging.error(f"Runner script execution failed: {e}")
         sys.exit(1)  # Exit with error if runner itself fails
 
 

@@ -1,8 +1,7 @@
-mlflow
 torch>=1.10 # DDP and other features are well-supported
 torchvision
 # Add other direct Python dependencies for runner.py if any
 # numpy # often a good general inclusion
 # e.g.:
 # torchaudio
-# pandas 
+# pandas

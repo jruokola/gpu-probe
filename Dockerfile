@@ -7,12 +7,6 @@ RUN apt-get update && apt-get install -y git make gcc --no-install-recommends &&
 # ── 3. Copy project & resolve deps with pip ─────────────────────
 WORKDIR /app
 
-# Copy certificate into image
-COPY /mlflow-cert/ca.pem /etc/mlflow/certs/ca.pem
-
-# Set environment variable for MLflow client to find the cert
-ENV MLFLOW_TRACKING_SERVER_CERT_PATH=/etc/mlflow/certs/ca.pem
-
 # ----------  Python deps via pip  ----------
 COPY requirements.txt .
 # COPY pyproject.toml . # Keep if other tools use it, or remove if only for uv
