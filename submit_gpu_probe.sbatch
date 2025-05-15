@@ -1,54 +1,54 @@
 #!/bin/bash
 #SBATCH --job-name=gpu-probe-multinode
-#SBATCH --nodes=2
-#SBATCH --ntasks-per-node=1          # 1 container/GPU per node
+#SBATCH --nodes=2                  # 2× H100 nodes
+#SBATCH --ntasks-per-node=1        # 1 container / GPU
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=180G
 #SBATCH --time=01:00:00
 #SBATCH --output=/root/gpu_probe_%j.log
-#SBATCH --export=ALL                 # let Pyxis propagate rank vars
+#SBATCH --export=ALL               # expose RANK, LOCAL_RANK, …
 
-# ─── Cluster / Pyxis tuning ────────────────────────────────────────────────
+###################### cluster / NCCL tweaks ######################
 export PYXIS_VERBOSE=3
+export TORCH_DISTRIBUTED_TIMEOUT=900
 export NCCL_DEBUG=WARN
-export NCCL_SOCKET_IFNAME=^lo,dockerc
-export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
-export TORCH_DISTRIBUTED_DEBUG=DETAIL
-# give rendez-vous more time on a fresh multi-node launch
-export TORCH_CPP_LOG_LEVEL=INFO
-export TORCH_DISTRIBUTED_TIMEOUT=900        # seconds
+export NCCL_SOCKET_IFNAME=^lo,docker
 
-# ─── Image + shared mount point ------------------------------------------------
-IMAGE="cr.eu-north1.nebius.cloud/e00hdcpaq6azg81mmp/gpu-probe-4:latest"
-HOST_MNT_BASE="/data/cifar10_gpu_probe"     # *must exist on every node*
-CNTR_MNT_BASE="/app/dataset"                # path *inside* the container
+###################### image + shared mount #######################
+IMAGE="cr.eu-north1.nebius.cloud/e00hdcpaq6azg81mmp/gpu-probe-9:latest"
+HOST_CACHE="/data/cifar10_gpu_probe"      # exists on *all* hosts
+CNTR_CACHE="/app/dataset"                 # path *inside* container
 
-# make sure the host directory exists (safe even if it already does)
-srun --ntasks=$SLURM_NNODES --nodes=$SLURM_NNODES \
-     bash -c "mkdir -p $HOST_MNT_BASE && chmod 777 $HOST_MNT_BASE"
+###################### prepare host cache dir #####################
+srun --ntasks=$SLURM_NNODES bash -c "mkdir -p $HOST_CACHE && chmod 777 $HOST_CACHE"
 
-# ─── Master address & port -----------------------------------------------------
+###################### rendez-vous info ###########################
 MASTER_NODE=$(scontrol show hostnames $SLURM_JOB_NODELIST | head -n1)
 MASTER_IP=$(getent hosts $MASTER_NODE | awk '{print $1}')
 MASTER_PORT=$((49152 + RANDOM % 16384))
 
-echo "MASTER: $MASTER_NODE  ($MASTER_IP:$MASTER_PORT)"
-echo "IMAGE : $IMAGE"
-echo "MOUNT : $HOST_MNT_BASE  ->  $CNTR_MNT_BASE"
+echo "MASTER ${MASTER_NODE} (${MASTER_IP}:${MASTER_PORT})"
+echo "IMAGE  $IMAGE"
+echo "CACHE  $HOST_CACHE → $CNTR_CACHE"
 
-# ─── 1. Node-local GPU sanity checks (only on master) -------------------------
-srun --nodes=1 --ntasks=1 --exact --nodelist=$MASTER_NODE \
-     --container-image=$IMAGE \
-     --container-workdir=/app \
-     --container-mounts="$HOST_MNT_BASE:$CNTR_MNT_BASE:rw" \
-     python -m gpu_probe.runner --test
+###################### helper #####################################
+run_in_container () {
+  local NODELIST=$1 ; shift
+  srun --nodes=1 --ntasks=1 --exact --nodelist=$NODELIST \
+       --container-image="$IMAGE" \
+       --container-workdir=/app \
+       --container-env="MASTER_ADDR=$MASTER_IP,MASTER_PORT=$MASTER_PORT" \
+       --container-mounts="$HOST_CACHE:$CNTR_CACHE:rw" \
+       "$@"
+}
+
+###################### 1) node-local GPU probe ####################
+run_in_container $MASTER_NODE python -m gpu_probe.runner --test
 PROBE_RC=$?
 
-# ─── 2. Multi-node CIFAR-10 micro-benchmark -----------------------------------
-TRAIN_ARGS="--epochs 1 --batches_per_epoch 20 \
-            --lr 0.01 --data_path $CNTR_MNT_BASE"
-
+###################### 2) tiny CIFAR-10 run #######################
+TRAIN_ARGS="--epochs 1 --batches_per_epoch 20 --lr 0.01 --data_path $CNTR_CACHE"
 TORCHRUN_CMD="torchrun \
   --nnodes=$SLURM_NNODES \
   --nproc_per_node=$SLURM_GPUS_ON_NODE \
@@ -56,18 +56,17 @@ TORCHRUN_CMD="torchrun \
   --rdzv_endpoint=$MASTER_IP:$MASTER_PORT \
   src/gpu_probe/train.py $TRAIN_ARGS"
 
-srun --container-image=$IMAGE \
-     --container-workdir=/app \
-     --container-env=MASTER_ADDR=$MASTER_IP,MASTER_PORT=$MASTER_PORT \
-     --container-mounts="$HOST_MNT_BASE:$CNTR_MNT_BASE:rw" \
-     bash -c "$TORCHRUN_CMD"
+# start rank-0 first so its TCP store is ready
+run_in_container $MASTER_NODE bash -c "$TORCHRUN_CMD" &   # rank-0
+sleep 25   # give the store time to bind
+# launch the remaining node(s)
+for NODE in $(scontrol show hostnames $SLURM_JOB_NODELIST | tail -n +2); do
+  run_in_container $NODE bash -c "$TORCHRUN_CMD" &
+done
+wait
 TRAIN_RC=$?
 
-# ─── 3. Final status -----------------------------------------------------------
-if [[ $PROBE_RC -eq 0 && $TRAIN_RC -eq 0 ]]; then
-    echo "✅  Job finished successfully."
-    exit 0
-else
-    echo "❌  Job failed (probe=$PROBE_RC , train=$TRAIN_RC)."
-    exit 1
-fi
+###################### 3) final status ############################
+[[ $PROBE_RC -eq 0 && $TRAIN_RC -eq 0 ]] && {
+  echo "✅  All steps finished OK" ; exit 0 ; } || {
+  echo "❌  probe=$PROBE_RC  train=$TRAIN_RC" ; exit 1 ; }

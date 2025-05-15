@@ -4,7 +4,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Settings – change only these two paths
 # ---------------------------------------------------------------------------
-SRC_TARBALL="/gpu-probe/gpu-burn-1.0.tar.gz"   # pre-downloaded archive
+SRC_TARBALL="/app/gpu-burn-1.0.tar.gz"   # pre-downloaded archive
 BUILD_DIR="$(mktemp -d)"                          # scratch build dir
 
 # ---------------------------------------------------------------------------
