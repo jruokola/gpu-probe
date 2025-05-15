@@ -11,9 +11,9 @@
 
 # ─── Cluster / Pyxis tuning ────────────────────────────────────────────────
 export PYXIS_VERBOSE=3
-export NCCL_ASYNC_ERROR_HANDLING=1
 export NCCL_DEBUG=WARN
-export NCCL_SOCKET_IFNAME=^lo,docker
+export NCCL_SOCKET_IFNAME=^lo,dockerc
+export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 export TORCH_DISTRIBUTED_DEBUG=DETAIL
 # give rendez-vous more time on a fresh multi-node launch
 export TORCH_CPP_LOG_LEVEL=INFO

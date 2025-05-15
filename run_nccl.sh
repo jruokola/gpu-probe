@@ -9,7 +9,7 @@ set -euo pipefail
 #               -o /opt/nccl-tests/nccl-tests-2.20.tar.gz
 # Then bake /opt/nccl-tests/nccl-tests-2.20.tar.gz into the container image
 # or copy it to a shared path accessible by all Slurm nodes.
-SRC_TARBALL="/app/nccl-tests-2.20.tar.gz"
+SRC_TARBALL="/nccl-tests-2.20.tar.gz"
 
 # ── 2. Scratch build dir ─────────────────────────────────────────────────────
 BUILD_DIR="$(mktemp -d)"
@@ -26,7 +26,7 @@ make MPI=0
 ./build/all_reduce_perf -b 8M -e 8M -f 2 -g 1 | tee /nccl.txt
 
 echo -e "\n--- NCCL Test Output (/nccl.txt) ---"
-cat /tmp/nccl.txt
+cat /nccl.txt
 echo "----------------------------------------"
 
 bw=$(grep "8.0M" /nccl.txt | awk '{print $(NF-1)}')
