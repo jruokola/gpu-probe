@@ -90,7 +90,7 @@ def main():
         rc_burn = 1
 
     # -- result --------------------------------------------------------------
-    if rc_nccl == 0 and rc_burn == 0:
+    if rc_nccl == 0 and rc_burn == 0:  # SIGTERM and regular
         logging.info("✅  node-local GPU checks passed")
         sys.exit(0)
     logging.error(
