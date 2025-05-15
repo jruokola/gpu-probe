@@ -55,7 +55,7 @@ def main():
     parser.add_argument("--epochs", type=int, default=2)
     parser.add_argument("--batches_per_epoch", type=int, default=0)
     parser.add_argument("--lr", type=float, default=0.01)
-    parser.add_argument("--data_path", type=str, default="/data/datasets")
+    parser.add_argument("--data_path", type=str, default="/data/dataset")
     parser.add_argument("--dry_run_cpu", action="store_true")
     args = parser.parse_args()
 
